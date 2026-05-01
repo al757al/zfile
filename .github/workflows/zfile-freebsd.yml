@@ -1,4 +1,4 @@
-name: Build ZFile for FreeBSD (using official frontend)
+name: Build ZFile for FreeBSD (using official frontend dist & native binary)
 
 on:
   push:
@@ -11,61 +11,58 @@ jobs:
     timeout-minutes: 20
 
     steps:
-      - name: Checkout backend code
-        uses: actions/checkout@v4
-
       - name: Build on FreeBSD VM
         uses: vmactions/freebsd-vm@v1
         with:
           release: "14.0"
           run: |
-            # ---------- 1. 安装基础工具 ----------
-            pkg install -y openjdk21 maven wget
+            # ---------- 1. 安装必要工具 ----------
+            pkg install -y wget
 
-            # ---------- 2. 强制使用 Java 21 ----------
-            export JAVA_HOME=/usr/local/openjdk21
-            export PATH=$JAVA_HOME/bin:$PATH
-            java -version
+            # ---------- 2. 下载官方前端编译包 ----------
+            wget -O dist-4.0.10.zip https://github.com/zfile-dev/zfile-vue/releases/download/4.0.0/dist-4.0.10.zip
 
-            # ---------- 3. 获取官方前端文件 ----------
-            # 下载官方发布的 tar.gz 包（已验证存在）
+            # ---------- 3. 下载官方 Linux AMD64 原生可执行包 ----------
+            # 这个包里不包含 .jar，而是一个叫 'zfile' 的原生可执行文件
             wget -O zfile-official.tar.gz https://github.com/zfile-dev/zfile/releases/download/4.5.0/zfile-release_linux_amd64.tar.gz
-            
-            # 解压 tar.gz 里面的 jar 文件
             tar -xzf zfile-official.tar.gz
-            
-            # 清空默认静态资源目录，从官方 jar 中提取前端文件
-            rm -rf src/main/resources/static
-            mkdir -p src/main/resources/static
-            unzip -o zfile-release.jar "BOOT-INF/classes/static/*" -d tmp_static
-            mv tmp_static/BOOT-INF/classes/static/* src/main/resources/static/
-            rm -rf tmp_static zfile-official.tar.gz zfile-release.jar
 
-            # ---------- 4. 编译后端 ----------
-            mvn clean package -DskipTests
-
-            # ---------- 5. 制作 FreeBSD 部署包 ----------
+            # ---------- 4. 组装最终的部署包 ----------
             mkdir zfile-freebsd
-            cp target/zfile-*.jar zfile-freebsd/zfile.jar
 
-            # 启动脚本
+            # 4.1 放入前端文件
+            mkdir -p zfile-freebsd/static
+            unzip -o dist-4.0.10.zip -d zfile-freebsd/static/
+
+            # 4.2 放入可执行文件并赋予执行权限
+            # 解压后的原生可执行文件名为 'zfile'
+            cp zfile zfile-freebsd/zfile
+            chmod +x zfile-freebsd/zfile
+
+            # # 4.3 创建应用配置文件 application.yml (可选)
+            # # 如果你需要自定义配置，可以取消注释并根据需要修改
+            # cat > zfile-freebsd/application.yml << 'YAML_EOF'
+            # server:
+            #   port: 8080
+            # spring:
+            #   web:
+            #     resources:
+            #       static-locations: file:./static/
+            # YAML_EOF
+
+            # ---------- 5. 创建启动脚本 ----------
+            # 这个脚本会在你的 Serv00 (FreeBSD) 上运行
             cat > zfile-freebsd/start.sh << 'SCRIPT_EOF'
             #!/bin/sh
-            JAVA_HOME=/usr/local/openjdk21
-            $JAVA_HOME/bin/java -jar zfile.jar \
-              --spring.web.resources.static-locations=file:./static/ \
-              > zfile.log 2>&1 &
-            echo "ZFile started. PID: $!"
+            # 启动 ZFile 应用
+            # 确保 'zfile' 文件旁边有 'static' 文件夹
+            # 你可以在这里添加其他启动参数，例如：
+            # ./zfile --server.port=你的端口号
+            ./zfile
             SCRIPT_EOF
             chmod +x zfile-freebsd/start.sh
 
-            # 提取外部静态文件（可选，供启动脚本使用）
-            mkdir zfile-freebsd/static
-            unzip -o zfile.jar "BOOT-INF/classes/static/*" -d tmp_static
-            mv tmp_static/BOOT-INF/classes/static/* zfile-freebsd/static/
-            rm -rf tmp_static
-
-            # 打包
+            # ---------- 6. 打包 ----------
             tar -czvf zfile-freebsd.tar.gz zfile-freebsd
 
       - name: Upload artifact
