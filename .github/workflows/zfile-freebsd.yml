@@ -8,7 +8,7 @@ on:
 jobs:
   build-freebsd:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
 
     steps:
       - name: Checkout backend code
@@ -19,27 +19,29 @@ jobs:
         with:
           release: "14.0"
           run: |
-            # ---------- 1. 安装必要工具 ----------
+            # 1. 安装依赖
             pkg install -y openjdk21 maven wget
 
-            # ---------- 2. 强制使用 Java 21 ----------
+            # 2. 强制使用 Java 21
             export JAVA_HOME=/usr/local/openjdk21
             export PATH=$JAVA_HOME/bin:$PATH
             java -version
 
-            # ---------- 3. 前端：直接使用官方预编译包 ----------
+            # 3. 前端：下载官方预编译包并放入源码
             wget -O dist.zip https://github.com/zfile-dev/zfile-vue/releases/download/4.0.0/dist-4.0.10.zip
             rm -rf src/main/resources/static
-            mkdir -p src/main/resources/static
             unzip -o dist.zip -d src/main/resources/static/
             rm dist.zip
 
-            # ---------- 4. 后端：Maven 编译 ----------
+            # 4. 后端：Maven 编译
             mvn clean package -DskipTests
 
-            # ---------- 5. 制作 FreeBSD 部署包 ----------
+            # 5. 组装部署包
             mkdir zfile-freebsd
             cp target/zfile-*.jar zfile-freebsd/zfile.jar
+
+            # 外部 static 目录：直接从源码复制（与 jar 内一致）
+            cp -r src/main/resources/static zfile-freebsd/static
 
             # 启动脚本
             cat > zfile-freebsd/start.sh << 'SCRIPT_EOF'
@@ -52,13 +54,7 @@ jobs:
             SCRIPT_EOF
             chmod +x zfile-freebsd/start.sh
 
-            # 可选：提取一份静态文件出来放外面
-            mkdir zfile-freebsd/static
-            unzip -o zfile.jar "BOOT-INF/classes/static/*" -d tmp
-            mv tmp/BOOT-INF/classes/static/* zfile-freebsd/static/
-            rm -rf tmp
-
-            # 打包
+            # 6. 打包
             tar -czvf zfile-freebsd.tar.gz zfile-freebsd
 
       - name: Upload artifact
