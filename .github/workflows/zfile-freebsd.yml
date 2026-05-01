@@ -8,7 +8,7 @@ on:
 jobs:
   build-freebsd:
     # 需要 macOS 或 Ubuntu 运行器来启动 FreeBSD 虚拟机
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest     # ✅ 换成 Ubuntu，等待更短
     name: Build on FreeBSD VM
     timeout-minutes: 30
 
