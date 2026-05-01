@@ -3,75 +3,65 @@ name: Build ZFile for FreeBSD
 on:
   push:
     branches: [ "master", "main" ]
-  workflow_dispatch:       # 允许手动触发
+  workflow_dispatch:
 
 jobs:
   build-freebsd:
-    # 需要 macOS 或 Ubuntu 运行器来启动 FreeBSD 虚拟机
-    runs-on: ubuntu-latest     # ✅ 换成 Ubuntu，等待更短
-    name: Build on FreeBSD VM
+    runs-on: ubuntu-latest
     timeout-minutes: 30
 
     steps:
-      - name: Checkout code
+      - name: Checkout backend code
         uses: actions/checkout@v4
 
-      - name: Prepare frontend code
-        # 如果前端代码在同一个仓库的子目录中（例如 frontend/），无需额外操作
-        # 如果前端是独立仓库，可以在这里 checkout 另一个仓库
-        run: |
-          # 示例：如果前端代码在另一个仓库，取消注释下一行
-          # git clone https://github.com/zfile-dev/zfile-vue.git frontend
-          echo "前端代码已就绪（假设位于 ./frontend）"
+      - name: Build on FreeBSD VM
+        uses: vmactions/freebsd-vm@v1
+        with:
+          release: "14.0"
+          run: |
+            # ---------- 1. 安装依赖 ----------
+            pkg install -y git openjdk21 node20 npm maven
 
-      - name: Build on FreeBSD
-  uses: vmactions/freebsd-vm@v1
-  with:
-    release: "14.0"
-    run: |
-      # ---------- 1. 安装必要工具 ----------
-      pkg install -y git openjdk21 node20 npm maven
+            # ---------- 2. 强制使用 Java 21 ----------
+            export JAVA_HOME=/usr/local/openjdk21
+            export PATH=$JAVA_HOME/bin:$PATH
+            java -version
 
-      # ---------- 2. 强制使用 Java 21 ----------
-      export JAVA_HOME=/usr/local/openjdk21
-      export PATH=$JAVA_HOME/bin:$PATH
-      java -version   # 必须输出 21.x
+            # ---------- 3. 克隆前端仓库并构建 ----------
+            git clone https://github.com/zfile-dev/zfile-vue.git frontend
+            cd frontend
+            npm install
+            npm run build
+            cd ..
 
-      # ---------- 3. 克隆前端仓库 ----------
-      git clone https://github.com/zfile-dev/zfile-vue.git frontend
-      cd frontend
-      npm install
-      npm run build
-      cd ..
+            # ---------- 4. 集成前端，打包后端 ----------
+            mkdir -p src/main/resources/static
+            cp -r frontend/dist/* src/main/resources/static/
+            mvn clean package -DskipTests
 
-      # ---------- 4. 集成前端并打包后端 ----------
-      mkdir -p src/main/resources/static
-      cp -r frontend/dist/* src/main/resources/static/
-      mvn clean package -DskipTests
+            # ---------- 5. 制作 FreeBSD 部署包 ----------
+            mkdir zfile-freebsd
+            cp target/zfile-*.jar zfile-freebsd/zfile.jar
 
-      # ---------- 5. 制作 FreeBSD 部署包 ----------
-      mkdir zfile-freebsd
-      cp target/zfile-*.jar zfile-freebsd/zfile.jar
+            # 启动脚本
+            cat > zfile-freebsd/start.sh << 'SCRIPT_EOF'
+            #!/bin/sh
+            JAVA_HOME=/usr/local/openjdk21
+            $JAVA_HOME/bin/java -jar zfile.jar \
+              --spring.web.resources.static-locations=file:./static/ \
+              > zfile.log 2>&1 &
+            echo "ZFile started. PID: $!"
+            SCRIPT_EOF
+            chmod +x zfile-freebsd/start.sh
 
-      # 创建启动脚本
-      cat > zfile-freebsd/start.sh << 'EOF'
-      #!/bin/sh
-      JAVA_HOME=/usr/local/openjdk21
-      $JAVA_HOME/bin/java -jar zfile.jar \
-        --spring.web.resources.static-locations=file:./static/ \
-        > zfile.log 2>&1 &
-      echo "ZFile started. PID: $!"
-      EOF
-      chmod +x zfile-freebsd/start.sh
+            # 提取外部静态文件（可选，供启动脚本使用）
+            mkdir zfile-freebsd/static
+            unzip -o zfile.jar "BOOT-INF/classes/static/*" -d tmp_static
+            mv tmp_static/BOOT-INF/classes/static/* zfile-freebsd/static/
+            rm -rf tmp_static
 
-      # 提取外部静态文件（可选）
-      mkdir zfile-freebsd/static
-      unzip -o zfile.jar "BOOT-INF/classes/static/*" -d tmp_static
-      mv tmp_static/BOOT-INF/classes/static/* zfile-freebsd/static/
-      rm -rf tmp_static
-
-      # 打包
-      tar -czvf zfile-freebsd.tar.gz zfile-freebsd
+            # 打包为 .tar.gz
+            tar -czvf zfile-freebsd.tar.gz zfile-freebsd
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
