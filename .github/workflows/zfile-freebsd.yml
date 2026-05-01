@@ -1,4 +1,4 @@
-name: Build ZFile for FreeBSD (JAR + official frontend)
+name: Build ZFile for FreeBSD (frontend from official tar.gz)
 
 on:
   push:
@@ -27,16 +27,25 @@ jobs:
             export PATH=$JAVA_HOME/bin:$PATH
             java -version
 
-            # 3. 前端：下载官方预编译包并放入源码
-            wget -O dist.zip https://github.com/zfile-dev/zfile-vue/releases/download/4.0.0/dist-4.0.10.zip
+            # 3. 下载官方 v4.5.0 Linux 发布包
+            wget -O zfile-official.tar.gz https://github.com/zfile-dev/zfile/releases/download/4.5.0/zfile-release_linux_amd64.tar.gz
+            
+            # 4. 解压发布包，获取前端文件
+            mkdir -p zfile-extracted
+            tar -xzf zfile-official.tar.gz -C zfile-extracted
+            
+            # 5. 将前端静态文件复制到后端源码目录
             rm -rf src/main/resources/static
-            unzip -o dist.zip -d src/main/resources/static/
-            rm dist.zip
+            # 假设官方包的 static 目录在解压后的根目录下
+            cp -r zfile-extracted/static src/main/resources/static
+            
+            # 清理临时文件
+            rm -rf zfile-extracted zfile-official.tar.gz
 
-            # 4. 后端：Maven 编译
+            # 6. 后端：Maven 编译
             mvn clean package -DskipTests
 
-            # 5. 组装部署包
+            # 7. 组装部署包
             mkdir zfile-freebsd
             cp target/zfile-*.jar zfile-freebsd/zfile.jar
 
@@ -54,7 +63,7 @@ jobs:
             SCRIPT_EOF
             chmod +x zfile-freebsd/start.sh
 
-            # 6. 打包
+            # 8. 打包
             tar -czvf zfile-freebsd.tar.gz zfile-freebsd
 
       - name: Upload artifact
