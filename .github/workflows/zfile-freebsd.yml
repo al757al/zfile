@@ -1,4 +1,4 @@
-name: Build ZFile for FreeBSD (frontend from official tar.gz)
+name: Build ZFile for FreeBSD (frontend + bin from official tar.gz)
 
 on:
   push:
@@ -30,17 +30,13 @@ jobs:
             # 3. 下载官方 v4.5.0 Linux 发布包
             wget -O zfile-official.tar.gz https://github.com/zfile-dev/zfile/releases/download/4.5.0/zfile-release_linux_amd64.tar.gz
             
-            # 4. 解压发布包，获取前端文件
+            # 4. 解压发布包
             mkdir -p zfile-extracted
             tar -xzf zfile-official.tar.gz -C zfile-extracted
             
-            # 5. 将前端静态文件复制到后端源码目录
+            # 5. 提取前端静态文件到后端源码目录（用于编译 jar）
             rm -rf src/main/resources/static
-            # 假设官方包的 static 目录在解压后的根目录下
             cp -r zfile-extracted/static src/main/resources/static
-            
-            # 清理临时文件
-            rm -rf zfile-extracted zfile-official.tar.gz
 
             # 6. 后端：Maven 编译
             mvn clean package -DskipTests
@@ -49,10 +45,19 @@ jobs:
             mkdir zfile-freebsd
             cp target/zfile-*.jar zfile-freebsd/zfile.jar
 
-            # 外部 static 目录：直接从源码复制（与 jar 内一致）
+            # 外部静态目录：直接复制源码中的 static（与 jar 内一致）
             cp -r src/main/resources/static zfile-freebsd/static
 
-            # 启动脚本
+            # 复制官方的 application.properties 和 bin 目录
+            if [ -f zfile-extracted/application.properties ]; then
+              cp zfile-extracted/application.properties zfile-freebsd/
+            fi
+            if [ -d zfile-extracted/bin ]; then
+              cp -r zfile-extracted/bin zfile-freebsd/
+              chmod +x zfile-freebsd/bin/*
+            fi
+
+            # 保留自定义启动脚本（方便直接使用）
             cat > zfile-freebsd/start.sh << 'SCRIPT_EOF'
             #!/bin/sh
             JAVA_HOME=/usr/local/openjdk21
@@ -62,6 +67,9 @@ jobs:
             echo "ZFile started. PID: $!"
             SCRIPT_EOF
             chmod +x zfile-freebsd/start.sh
+
+            # 清理临时文件
+            rm -rf zfile-extracted zfile-official.tar.gz
 
             # 8. 打包
             tar -czvf zfile-freebsd.tar.gz zfile-freebsd
